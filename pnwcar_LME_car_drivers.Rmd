@@ -1,0 +1,679 @@
+---
+title: "PNW CAR - LME for drivers of carbon accumulation rates"
+author: "Katrina Poppe"
+date: "`r format(Sys.time(), '%d-%B-%Y %H:%M')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+# Packages
+
+```{r message=FALSE, warning=FALSE}
+
+library(here) #working directory
+library(tidyverse) #data manipulation
+library(glmnet) #LASSO
+library(stabs) #stability selection
+library(lme4) #linear mixed effects model
+library(performance) #model performance
+library(MuMIn) #dredge
+library(nlme) #random effect importance
+library(glmmTMB) #marginal vs conditional R2
+library(ggpubr) #R2 in plots
+
+```
+
+# Load data
+
+```{r }
+data_S1 <- read.csv(here("pnwcar_data.csv"))
+
+data <- data_S1 %>%
+  filter (project != "SeaGrant")
+
+data <- data %>%
+  mutate(lat_cent = scale(lat),
+         z_star_cent = scale(z_star),
+         RSLR_cent = scale(RSLR),
+         ws_area_cent = scale(ws_area),
+         rel_sed_cent = scale(rel_sed),
+         dist_chan_cent = scale(dist_chan),
+         wl_annual_cent = scale(wl_annual),
+         wl_summer_cent = scale(wl_summer),
+         wl_grow_cent = scale(wl_grow),
+         sal_annual_cent = scale(sal_annual),
+         sal_summer_cent = scale(sal_summer),
+         sal_grow_cent = scale(sal_grow),
+         ts_annual_cent = scale(ts_annual),
+         ts_summer_cent = scale(ts_summer),
+         ts_grow_cent = scale(ts_grow),
+         tw_deep_annual_cent = scale(tw_deep_annual),
+         tw_deep_summer_cent = scale(tw_deep_summer),
+         tw_deep_grow_cent = scale(tw_deep_grow)
+         )
+
+data_tidal <- data %>%
+  filter(land_use !="Disturbed")
+
+```
+
+# All sites
+
+## LASSO variable selection
+
+### Create predictor matrix
+
+```{r}
+
+variables <- c("lat_cent",
+               "wl_annual_cent",
+               "wl_summer_cent",
+               "wl_grow_cent",
+               "sal_annual_cent",
+               "sal_summer_cent",
+               "sal_grow_cent",
+               "ts_annual_cent",
+               "ts_summer_cent",
+               "ts_grow_cent",
+               "tw_deep_annual_cent",
+               "tw_deep_summer_cent",
+               "tw_deep_grow_cent")
+
+data_model1 <- data %>%
+  select(car_all, estuary, all_of(variables)) %>%
+  na.omit()
+
+# Create predictor matrix (excluding 'estuary' since LASSO handles only fixed effects)
+X <- model.matrix(~ ., data_model1[, variables])[, -1]  # Remove intercept column
+y <- data_model1$car_all  # Response variable
+
+```
+
+### Stability selection - variable importance
+
+```{r}
+set.seed(123)
+stabsel_fit <- stabsel(
+  x = X,
+  y = y,
+  fitfun = glmnet.lasso,  # LASSO fitting function built into stabs
+  cutoff = 0.6,          # Variable must be selected in ≥x% of subsamples; default is 0.75
+  PFER = 3,              # Controls expected false positives; default is 1
+  B = 200               # Controls resampling -> more precision; default is 100
+)
+
+# Output results
+print(stabsel_fit)
+plot(stabsel_fit)
+
+# Access selected variables
+stable_vars <- stabsel_fit$selected
+print(stable_vars)
+
+```
+
+### Plot variable importance
+```{r}
+
+# Extract selection proportions
+selection_df <- data.frame(
+  variable = names(stabsel_fit$max),
+  selection_prob = stabsel_fit$max
+)
+
+# Reorder variable factor levels so highest is on top in the plot
+selection_df <- selection_df %>%
+  arrange(desc(selection_prob)) %>%
+  mutate(variable = factor(variable, levels = rev(variable)))  # key change here
+
+# Plot with highest proportion on top
+ggplot(selection_df, aes(x = variable, y = selection_prob)) +
+  geom_col(fill = "steelblue") +
+  geom_hline(yintercept = stabsel_fit$cutoff, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(title = "Stability Selection: Variable Importance",
+       y = "Selection Proportion",
+       x = "Variable") +
+  theme_minimal()
+
+```
+
+### Lasso model
+
+```{r}
+set.seed(123)
+lasso_model <- cv.glmnet(X, y, alpha = 1)  # Alpha = 1 for LASSO (L1 penalty)
+plot(lasso_model)  # Visualize cross-validation results
+
+```
+
+### Coefficient matrix - lambda.1se
+
+```{r}
+coef_matrix <- coef(lasso_model, s = "lambda.1se")
+print(coef_matrix)
+
+```
+
+### Coefficient matrix - lambda.min
+Used the variables selected here
+
+```{r}
+selected_vars <- names(coef(lasso_model, s = "lambda.min"))[-1]
+print(selected_vars)
+coef(lasso_model, s = "lambda.min")
+
+```
+
+## Determine best LME model
+
+### 1st "global" model
+include variables selected with LASSO
+
+```{r warning=FALSE, message=FALSE}
+
+data_model2 <- data %>%
+  select(car_all, wl_grow_cent, sal_annual_cent, lat_cent, estuary, land_use) %>%
+  na.omit()
+
+model2 <- lmer(car_all ~
+                 wl_grow_cent +
+                 sal_annual_cent +
+                 lat_cent +
+                 (1|estuary), 
+               data = data_model2,
+               na.action = na.fail,
+               REML = TRUE)
+
+summary(model2)
+model_performance(model2)
+
+```
+
+### Dredge AICc model selection
+
+```{r}
+model2_set <- dredge(model2, rank="AICc")
+print(model2_set)
+sw(model2_set)
+
+```
+
+### Importance of random effect
+
+```{r}
+model2_without <- lm(car_all ~ wl_grow_cent + sal_annual_cent + lat_cent,
+                data = data_model2)
+model2_with <- lmer(car_all ~ wl_grow_cent + sal_annual_cent + lat_cent + (1|estuary),
+                   data = data_model2)
+
+lr_test <- lmtest::lrtest(model2_without, model2_with)
+print(lr_test)
+
+summary(model2_without)
+summary(model2_with)
+
+```
+
+### Compare conditional and marginal R2
+If conditional (R2c) much higher than marginal (R2m), random effect contributes significantly
+
+```{r}
+model_with_RE <- glmmTMB(car_all ~ wl_grow_cent + sal_annual_cent + lat_cent + (1 | estuary), 
+                         data = data_model2)
+
+# Get marginal and conditional R2
+r2_values <- r.squaredGLMM(model_with_RE)
+print(r2_values)
+
+```
+
+### Updated model without random effect
+
+```{r}
+data_model3 <- data %>%
+  select(car_all, wl_grow_cent, sal_annual_cent, lat_cent, estuary, land_use) %>%
+  na.omit()
+
+model3 <- lm(car_all ~ wl_grow_cent + sal_annual_cent + lat_cent,
+              data = data_model3,
+             na.action = na.fail)
+summary(model3)
+
+```
+
+### Dredge AICc model selection - without random effect
+
+```{r}
+# Run dredge and store the model set
+model3_set <- dredge(model3, rank = "AICc")
+print(model3_set)
+
+# Get variable importance
+sw(model3_set)
+
+# Extract and print adjusted R² for each model
+adj_r2s <- sapply(1:nrow(model3_set), function(i) {
+  mod_i <- get.models(model3_set, subset = i)[[1]]
+  summary(mod_i)$adj.r.squared
+})
+
+# Print adjusted R² values
+print(round(adj_r2s, 3))
+
+```
+
+### Model averaging
+For top two models with delta AICc < 2
+
+```{r}
+# Select top 2 models (delta AICc ≤ 2)
+top_models <- get.models(model3_set, subset = delta <= 2.0) 
+
+# Perform model averaging
+model_avg <- model.avg(top_models, full = TRUE)
+
+# View the averaged coefficients and importance
+summary(model_avg)
+rvi <- sw(model_avg)
+coefs <- summary(model_avg)$coefmat.full  # Use coefmat.full for full averaging
+print(coefs)
+
+
+# Create the results data frame
+results_df <- as.data.frame(coefs) %>%
+  rownames_to_column("Variable") %>%
+  filter(Variable != "(Intercept)") %>%
+  mutate(
+    Lower_CI = Estimate - 1.96 * `Adjusted SE`,
+    Upper_CI = Estimate + 1.96 * `Adjusted SE`,
+    RVI = rvi[Variable]
+  ) %>%
+  select(Variable, Estimate, SE = `Adjusted SE`, Lower_CI, Upper_CI, RVI)
+
+print(results_df)
+
+```
+
+### Mean adjusted R2 value for model_avg
+```{r}
+# Extract adjusted R² for each
+adj_r2_values <- sapply(top_models, function(mod) summary(mod)$adj.r.squared)
+
+# Average adjusted R²
+mean_adj_r2 <- mean(adj_r2_values, na.rm = TRUE)
+cat("Mean Adjusted R² (models used in averaging):", round(mean_adj_r2, 2), "\n")
+
+```
+
+### Coefficient plot model avg
+
+```{r}
+
+# plot coefficient values and CI
+variable_mapping <- c("wl_grow_cent" = "Water table level",
+                      "lat_cent" = "Latitude")
+
+# Apply variable_mapping to the 'Variable' column in results_df
+results_df$Variable <- dplyr::recode(results_df$Variable, !!!variable_mapping)
+
+# Plot coefficient values and CI
+p1 <- ggplot(results_df, aes(x = Estimate, y = Variable)) +
+  geom_point(size = 1.5) +
+  geom_linerange(aes(xmin = Lower_CI, xmax = Upper_CI)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Coefficient value",
+    y = ""
+  ) +
+  theme_bw() +
+  ggtitle("(a) All sites") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12)) +
+    coord_cartesian(xlim = c(-30, 100)) +
+  scale_y_discrete(labels = function(x) ifelse(x == "Placeholder", "", str_wrap(x, width = 15))) # Hide text
+
+# Add text labels for RVI values
+p1 <- p1 + geom_text(data = results_df %>% filter(!is.na(RVI)),  
+                   aes(label = paste0("RVI = ", sprintf("%.1f", RVI)), 
+                       x = Upper_CI + 0.02), 
+                   size = 4, hjust = -0.2)
+p1
+
+```
+
+### Plot observed vs predicted CAR - model avg without random effect
+
+```{r warning=FALSE, message=FALSE}
+data_model3$observed_values <- data_model3$car_all
+data_model3$predicted_values <- predict(model_avg, type = "response")
+
+p3 <- ggplot(data_model3, aes(x=predicted_values, y=observed_values)) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  geom_abline(intercept = 0, slope=1, linetype = "dashed") +
+  stat_cor(aes(label= ..rr.label..), digits = 2,  label.x = 110, label.y = 300) +
+  labs(color = "Land use",
+       x=expression("Predicted CAR " ~(g ~C ~m^-2 ~yr^-1)),  
+       y=expression("Observed CAR " ~(g ~C ~m^-2 ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) +
+  scale_y_continuous(limits = c(-50, 360)) +
+  scale_x_continuous(limits = c(-20, 150)) +
+  theme_bw() +
+   ggtitle("(a) All sites") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    # Adjust axis text size
+        axis.title = element_text(size = 10),   # Adjust axis title size
+        legend.text = element_text(size = 10),  # Adjust legend text size
+        legend.title = element_text(size = 10),
+        legend.position = c(0.2, 0.8)) 
+p3
+
+```
+
+
+# Tidal sites
+
+## LASSO variable selection
+
+### Create predictor matrix
+
+```{r}
+variables <- c("RSLR_cent", #tidal only
+               "rel_sed_cent", #tidal only
+               "ws_area_cent", #tidal only
+               "dist_chan_cent", #tidal only
+               "z_star_cent", #tidal only
+               "lat_cent",
+               "wl_annual_cent",
+               "wl_summer_cent",
+               "wl_grow_cent",
+               "sal_annual_cent",
+               "sal_summer_cent",
+               "sal_grow_cent",
+               "ts_annual_cent",
+               "ts_summer_cent",
+               "ts_grow_cent",
+               "tw_deep_annual_cent",
+               "tw_deep_summer_cent",
+               "tw_deep_grow_cent"
+               )
+
+data_model4 <- data_tidal %>%
+  select(car_all, estuary, all_of(variables)) %>%
+  na.omit()
+
+# Create predictor matrix (excluding 'estuary' since LASSO handles only fixed effects)
+X <- model.matrix(~ ., data_model4[, variables])[, -1]  # Remove intercept column
+y <- data_model4$car_all  # Response variable
+
+```
+
+### Stability selection - variable importance
+
+```{r}
+set.seed(123)
+stabsel_fit <- stabsel(
+  x = X,
+  y = y,
+  fitfun = glmnet.lasso,  # LASSO fitting function built into stabs
+  cutoff = 0.6,          # Variable must be selected in ≥x% of subsamples; default is 0.75
+  PFER = 3,              # Controls expected false positives; default is 1
+  B = 200               # Controls resampling -> more precision; default is 100
+)
+
+# Output results
+print(stabsel_fit)
+plot(stabsel_fit, cex.axis = 0.8)
+
+# Access selected variables
+stable_vars <- stabsel_fit$selected
+print(stable_vars)
+
+```
+
+### Plot variable importance
+
+```{r}
+# Extract selection proportions
+selection_df <- data.frame(
+  variable = names(stabsel_fit$max),
+  selection_prob = stabsel_fit$max
+)
+
+# Reorder variable factor levels so highest is on top in the plot
+selection_df <- selection_df %>%
+  arrange(desc(selection_prob)) %>%
+  mutate(variable = factor(variable, levels = rev(variable)))  # key change here
+
+# Plot with highest proportion on top
+ggplot(selection_df, aes(x = variable, y = selection_prob)) +
+  geom_col(fill = "steelblue") +
+  geom_hline(yintercept = stabsel_fit$cutoff, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(title = "Stability Selection: Variable Importance",
+       y = "Selection Proportion",
+       x = "Variable") +
+  theme_minimal()
+
+```
+
+### Lasso model
+
+```{r}
+lasso_model <- cv.glmnet(X, y, alpha = 1)  # Alpha = 1 for LASSO (L1 penalty)
+plot(lasso_model)  # Visualize cross-validation results
+
+```
+
+### Coefficient matrix - lambda.1se
+
+```{r}
+coef_matrix <- coef(lasso_model, s = "lambda.1se")
+print(coef_matrix)
+
+```
+
+### Coefficient matrix - lambda.min
+
+```{r}
+selected_vars <- names(coef(lasso_model, s = "lambda.min"))[-1]
+print(selected_vars)
+coef(lasso_model, s = "lambda.min")
+
+```
+
+## Determine best LME model
+
+### 1st "global" model
+Using variables selected by LASSO
+```{r warning=FALSE, message=FALSE}
+
+data_model5 <- data_tidal %>%
+  select(car_all, wl_grow_cent, estuary, land_use) %>%
+  na.omit()
+
+model5 <- lmer(car_all ~
+                 wl_grow_cent +
+                 (1|estuary),
+               data = data_model5,
+               na.action = na.fail)
+
+summary(model5)
+performance(model5)
+
+```
+
+### Dredge AICc model selection
+
+```{r}
+model5_set <- dredge(model5, rank="AICc")
+print(model5_set)
+sw(model5_set)
+
+```
+
+### Importance of random effect
+
+```{r}
+
+model5_without <- lm(car_all ~ wl_grow_cent,
+                data = data_model5)
+model5_with <- lmer(car_all ~ wl_grow_cent + (1|estuary),
+                   data = data_model5)
+
+lr_test <- lmtest::lrtest(model5_without, model5_with)
+print(lr_test)
+
+```
+
+### Compare conditional and marginal R2
+
+If conditional (R2c) much higher than marginal (R2m), random effect contributes significantly
+```{r}
+model_with_RE <- glmmTMB(car_all ~ wl_grow_cent + (1 | estuary), 
+                         data = data_model5)
+
+# Get marginal and conditional R2
+r2_values <- r.squaredGLMM(model_with_RE)
+print(r2_values)
+```
+
+### Coefficient plot
+
+Optimal model same as 1st model
+```{r}
+# Extract coefficients and confidence intervals from model5
+coefs_model5 <- summary(model5)$coefficients
+
+# Create results dataframe from model5
+results_df2 <- data.frame(
+  Variable = rownames(coefs_model5),
+  Estimate = coefs_model5[, "Estimate"],
+  SE = coefs_model5[, "Std. Error"]
+) %>%
+  filter(Variable != "(Intercept)") %>%
+  mutate(
+    Lower_CI = Estimate - 1.96 * SE,
+    Upper_CI = Estimate + 1.96 * SE
+  )
+
+# Add missing variables with NA to preserve space in the plot
+all_vars <- c("wl_grow_cent", "lat_cent")
+
+# Add mapping and ordering
+results_df2 <- results_df2 %>%
+  right_join(data.frame(Variable = all_vars), by = "Variable") %>%
+  mutate(
+    Variable = factor(Variable, levels = all_vars),  # correct data order
+    Predictor = variable_mapping[as.character(Variable)],
+    Predictor = factor(Predictor, levels = variable_mapping[all_vars])  # correct visual order
+  )
+
+# Map variable names to nice labels
+variable_mapping <- c("wl_grow_cent" = "Water table level",
+                      "lat_cent" = "Latitude")
+
+results_df2$Predictor <- variable_mapping[results_df2$Variable]
+
+# Optional: set RVI to NA or 0 since this isn't a model-averaged result
+#results_df2$RVI_text <- NA
+results_df2$RVI_text <- ifelse(!is.na(results_df2$Estimate), "RVI = 1.0", NA)
+
+p2 <- ggplot(results_df2, aes(x = Estimate, y = Predictor)) +
+  geom_point(size = 1.5, na.rm = TRUE) +
+  geom_linerange(aes(xmin = Lower_CI, xmax = Upper_CI), na.rm = TRUE) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Coefficient value", y = "") +
+  theme_bw() +
+  ggtitle("(b) Tidal sites") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5)) +
+  theme(panel.grid = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12)) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 15)) +
+  coord_cartesian(xlim = c(-30, 100)) 
+
+# Add text labels for RVI values
+p2 <- p2 + geom_text(data = results_df2 %>% filter(!is.na(RVI_text)),  
+                   aes(label = RVI_text, x = Upper_CI + 0.02), 
+                   size = 4, hjust = -0.2)
+p2
+
+```
+
+### Plot observed vs predicted CAR
+
+```{r warning=FALSE, message=FALSE}
+
+data_model5$observed_values <- data_model5$car_all
+data_model5$predicted_values <- predict(model5, type = "response")
+
+p4 <- ggplot(data_model5, aes(x=predicted_values, y=observed_values)) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  geom_abline(intercept = 0, slope=1, linetype = "dashed") +
+  stat_cor(aes(label= ..rr.label..), digits = 2, label.x = 110, label.y = 300) +
+  labs(color = "Land use",
+       x=expression("Predicted CAR " ~(g ~C ~m^-2 ~yr^-1)),  
+       y=expression("Observed CAR " ~(g ~C ~m^-2 ~yr^-1))) +
+      scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF")) +
+  scale_y_continuous(limits = c(-50, 360)) +
+  scale_x_continuous(limits = c(-20, 150)) +
+  theme_bw() +
+  ggtitle("(b) Tidal sites") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    # Adjust axis text size
+        axis.title = element_text(size = 10),   # Adjust axis title size
+          legend.text = element_text(size = 10),  # Adjust legend text size
+        legend.title = element_text(size = 10),
+        legend.position = c(0.2, 0.84)) 
+p4
+
+```
+
+# Figures for paper
+
+## Fig S3 coefficient plot - combine all sites (p1) + tidal sites (p2)
+
+```{r}
+
+p2 <- p2 + theme(axis.text.y = element_blank(), 
+                 axis.ticks.y = element_blank())
+
+combined_coefficient_plot <- ggarrange(p1, p2, ncol = 2, widths = c(1.24, 1))
+print(combined_coefficient_plot)
+
+#ggsave("coefficients_combined.png", combined_coefficient_plot, width = 8, height = 4, units = "in", dpi = 300)
+
+```
+
+## Fig 5 obs vs pred - combine all sites (p3) + tidal sites (p4) 
+
+```{r}
+p4 <- p4 + theme(axis.title.y = element_blank())
+
+obs_pred_combined <- ggarrange(p3, p4, ncol = 2, widths = c(1.05, 1))
+print(obs_pred_combined)
+
+#ggsave("obs_pred_combined.png", obs_pred_combined, width = 8, height = 4, units = "in", dpi = 300)
+
+```
+
+

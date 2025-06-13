@@ -1,0 +1,534 @@
+---
+title: "PNW CAR - ANOVAs, post-hoc pairwise tests, and regressions"
+author: "Katrina Poppe"
+date: "`r format(Sys.time(), '%d-%B-%Y %H:%M')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+# Packages
+
+```{r message=FALSE, warning=FALSE}
+library(here) #working directory
+library(tidyverse) #data manipulation
+library(rstatix) #games-howell test
+library(ggpubr) #regression stats for plots
+
+```
+
+# Load data
+
+```{r }
+data_S1 <- read.csv(here("pnwcar_data.csv"))
+
+data <- data_S1 %>%
+  filter (project != "SeaGrant")
+
+data_tidal <- data %>%
+  filter(land_use !="Disturbed")
+
+variable_names <- c(
+  "car_all",
+  "pb210_all",
+  "cd",
+  "set",
+  "z_star",
+  "RSLR",
+  "lat",
+  "sal_annual", "sal_summer", "sal_grow",
+  "wl_annual", "wl_summer", "wl_grow",
+  "ts_annual", "ts_summer", "ts_grow",
+  "tw_deep_annual", "tw_deep_summer", "tw_deep_grow",
+  "ws_area",
+  "rel_sed",
+  "dist_chan"
+  )
+
+predictor_names <- c(
+  "pb210_all",
+  "cd",
+  "set",
+  "z_star",
+  "RSLR",
+  "lat",
+  "sal_annual", "sal_summer", "sal_grow",
+  "wl_annual", "wl_summer", "wl_grow",
+  "ts_annual", "ts_summer", "ts_grow",
+  "tw_deep_annual", "tw_deep_summer", "tw_deep_grow",
+  "ws_area",
+  "rel_sed",
+  "dist_chan"
+  )
+
+```
+
+# Means by wetland type
+
+```{r}
+# CAR in g C m-2 y-1
+means_car <- tapply(data$car_all, data$wetland_type2, mean, na.rm = TRUE)
+sds_car <- tapply(data$car_all, data$wetland_type2, sd, na.rm = TRUE)
+stats_car <- data.frame(
+  wetland_type2 = names(means_car),
+  mean_CAR = means_car,
+  sd_CAR = sds_car
+)
+cat("\n--- CAR (g C m^-2 yr^-1) ---\n")
+print(stats_car)
+
+# Pb-210 Accretion rate in cm yr-1
+means_pb <- tapply(data$pb210_all, data$wetland_type2, mean, na.rm = TRUE)
+sds_pb <- tapply(data$pb210_all, data$wetland_type2, sd, na.rm = TRUE)
+stats_pb <- data.frame(
+  wetland_type2 = names(means_pb),
+  mean_AR = means_pb,
+  sd_AR = sds_pb
+)
+cat("\n--- Pb-210 (dpm g^-1) ---\n")
+print(stats_pb)
+
+# Carbon Density (CD) in mg C cm-3
+means_cd <- tapply(data$cd, data$wetland_type2, mean, na.rm = TRUE)
+sds_cd <- tapply(data$cd, data$wetland_type2, sd, na.rm = TRUE)
+stats_cd <- data.frame(
+  wetland_type2 = names(means_cd),
+  mean_CD = means_cd,
+  sd_CD = sds_cd
+)
+cat("\n--- Carbon Density (g C cm^-3) ---\n")
+print(stats_cd)
+
+```
+
+# Welch ANOVA
+
+```{r}
+for (var_name in variable_names) {
+  formula <- formula(paste(var_name, "~ wetland_type2"))
+  aov_result <- oneway.test(formula, data = data, var.equal = FALSE)
+
+  cat("Variable:", var_name, "\n")
+  cat("F-value:", aov_result$statistic, "\n")
+  cat("df:", aov_result$parameter, "\n")
+  cat("P-Value:", aov_result$p.value, "\n")
+  cat("Significant difference:", ifelse(aov_result$p.value < 0.05, "Yes", "No"), "\n")
+  cat("\n")
+}
+```
+
+# Games-Howell post hoc test
+
+```{r}
+for (var_name in variable_names) {
+  formula <- formula(paste(var_name, "~ wetland_type2"))
+  gh_result <- games_howell_test(data = data, formula, detailed = FALSE)
+
+  # Add significance label
+  gh_result <- gh_result %>%
+    mutate(significance = case_when(
+      p.adj < 0.05 ~ "*",                     # significant
+      p.adj >= 0.05 & p.adj < 0.10 ~ "m",     # marginal
+      TRUE ~ ""                               # not significant
+    ))
+
+  cat("Variable:", var_name, "\n")
+  print(gh_result)
+  cat("\n")
+}
+```
+
+# Linear regressions
+Each variable vs CAR
+
+## All sites
+
+```{r}
+for (predictor in predictor_names) {
+  formula <- as.formula(paste("car_all ~", predictor))
+  model <- lm(formula, data = data)
+  cat(predictor, ":\n")
+  print(summary(model))
+  cat("\n\n")
+}
+```
+
+## Tidal sites
+
+```{r}
+for (predictor in predictor_names) {
+  formula <- as.formula(paste("car_all ~", predictor))
+  model <- lm(formula, data = data_tidal)
+  cat(predictor, ":\n")
+  print(summary(model))
+  cat("\n\n")
+}
+```
+
+# Figures for paper
+
+## Fig 2
+
+### CAR vs Pb210
+
+```{r}
+p1 <- ggplot(data, aes(x=pb210_all, y=car_all)) +
+        geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  stat_cor(aes(label= ..rr.label..), digits = 2,  label.x = 0.75, label.y = 320) + # if for 2 plots
+  labs(color = "Land use",
+       x=expression("Accretion rate " ~(cm ~yr^-1)), 
+       y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) +
+  ylim(-50, 370) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    # Adjust axis text size
+        axis.title = element_text(size = 10),   # Adjust axis title size
+        legend.text = element_text(size = 10),  # Adjust legend text size
+        legend.title = element_text(size = 10),
+        legend.position = c(0.2, 0.82)) 
+p1
+
+```
+### CAR vs CD
+
+```{r}
+p2 <- ggplot(data, aes(x=cd, y=car_all)) +
+        geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  stat_cor(aes(label= ..rr.label..), digits = 2,  label.x = 45, label.y = 320) + # if for 2 plots
+  labs(color = "Land use",
+       x=expression("C density " ~(mg ~C ~cm^-3)), 
+       y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) + 
+  ylim(-50, 370) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    # Adjust axis text size
+        axis.title = element_text(size = 10),   # Adjust axis title size
+        legend.text = element_text(size = 10),  # Adjust legend text size
+        legend.title = element_text(size = 10),
+        legend.position = c(0.2, 0.8)) 
+p2
+
+```
+
+### combine 2 plots from pb210 (p1) and CD (p2)
+```{r}
+p1 <- p1 + annotate("text", x = 1.0, y = -30, label = "A", size = 7, fontface = "plain") +
+  theme(legend.key.height = unit(0.5, "cm"),
+        axis.title = element_text(size = 11))
+
+p2 <- p2 + theme(axis.title = element_text(size = 11),
+                 axis.title.y = element_blank(),
+                 legend.position = "none") +
+  annotate("text", x = 55, y = -30, label = "B", size = 7, fontface = "plain")
+
+pb210_cd_combined <- ggarrange(p1, p2, ncol = 2, widths = c(1.05, 1))
+pb210_cd_combined
+
+#ggsave("pb210_cd_combined.png", pb210_cd_combined, width = 8, height = 4, units = "in", dpi = 300)
+
+```
+
+## Fig 3
+
+### CAR x Wetland type
+
+```{r warning=FALSE}
+data$wetland_type2 <- factor(data$wetland_type2, levels = c("Reference swamp", "Reference marsh", "Restored marsh", "Wet pasture", "Dry pasture"))
+
+letters_order1 <- c("a", "a", "ab", "b", "ab")
+
+sample_sizes <- data %>%
+  filter(!is.na(car_all)) %>%
+  group_by(wetland_type2) %>%
+  summarise(SampleSize = n())
+
+p3 <- ggplot(data=subset(data, !is.na(wetland_type2)), aes(x=wetland_type2, y=car_all)) +
+  geom_boxplot(aes(fill=wetland_type2), show.legend=FALSE) +
+  scale_fill_viridis_d(alpha = 0.5) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  labs(
+    y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1)), 
+    x=expression("Wetland type")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_text(data = sample_sizes, aes(label = paste(SampleSize), y = -60), size = 3) + # n at bottom
+  geom_text(data = sample_sizes, aes(label = letters_order1, y = 400), size = 3) + # sig diff letters at top
+  stat_summary(fun = mean, geom = "point", shape = 5, size = 2, color = "black")
+p3
+     
+```
+
+### Pb210 x Wetland type
+
+``` {r warning=FALSE}
+data$wetland_type2 <- factor(data$wetland_type2, levels = c("Reference swamp", "Reference marsh", "Restored marsh", "Wet pasture", "Dry pasture"))
+
+letters_order2 <- c("ab", "a", "a", "b", "ab")
+
+sample_sizes <- data %>%
+  filter(!is.na(pb210_all)) %>%
+  group_by(wetland_type2) %>%
+  summarise(SampleSize = n())
+
+p4 <- ggplot(data=subset(data, !is.na(wetland_type2)), aes(x=wetland_type2, y=pb210_all)) +
+  geom_boxplot(aes(fill=wetland_type2), show.legend=FALSE) +
+  scale_fill_viridis_d(alpha = 0.5) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  labs(
+    y=expression("Accretion rate " ~(cm ~yr^-1)), 
+    x=expression("Wetland type")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_text(data = sample_sizes, aes(label = paste(SampleSize), y = -0.3), size = 3) + # n at bottom
+  geom_text(data = sample_sizes, aes(label = letters_order2, y = 1.2), size = 3) + # sig diff letters at top
+  stat_summary(fun = mean, geom = "point", shape = 5, size = 2, color = "black")
+p4
+
+```
+
+### CD x Wetland type
+
+```{r warning=FALSE}
+data$wetland_type2 <- factor(data$wetland_type2, levels = c("Reference swamp", "Reference marsh", "Restored marsh", "Wet pasture", "Dry pasture"))
+
+letters_order3 <- c("a", "ab", "b", "ab", "ab")
+
+sample_sizes <- data %>%
+  filter(!is.na(cd)) %>%
+  group_by(wetland_type2) %>%
+  summarise(SampleSize = n())
+
+p5 <- ggplot(data=subset(data, !is.na(wetland_type2)), aes(x=wetland_type2, y=cd)) +
+  geom_boxplot(aes(fill=wetland_type2), show.legend=FALSE) +
+  scale_fill_viridis_d(alpha = 0.5) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  labs(
+    y=expression("C density " ~(mg ~C ~cm^-3)), 
+    x=expression("Wetland type")) +
+  ylim(0, 62) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  geom_text(data = sample_sizes, aes(label = paste(SampleSize), y = 0), size = 3) + # n at bottom
+  geom_text(data = sample_sizes, aes(label = letters_order3, y = 62), size = 3) + # sig diff letters at top
+  stat_summary(fun = mean, geom = "point", shape = 5, size = 2, color = "black")
+p5
+
+```
+
+### combine 3 plots vertically
+
+``` {r}
+p5_blank <- p5 + theme(axis.text.x = element_blank(), axis.title.x = element_blank()) +
+  annotate("text", x = 0.5, y = Inf, label = "A", size = 7, fontface = "plain", vjust = 1.5, hjust = -0.2) 
+p4_blank <- p4 + theme(axis.text.x = element_blank(), axis.title.x = element_blank()) +
+  annotate("text", x = 0.5, y = Inf, label = "B", size = 7, fontface = "plain", vjust = 1.5, hjust = -0.2)
+p3 <- p3 +
+  annotate("text", x = 0.5, y = Inf, label = "C", size = 7, fontface = "plain", vjust = 1.5, hjust = -0.2)
+
+combined_plot <- ggpubr::ggarrange(p5_blank, p4_blank, p3, nrow = 3, heights = c(1,1,1.18), align = "v")
+combined_plot
+
+#ggsave("anova_plot_vert.png", combined_plot, width = 4.5, height = 9, dpi = 300)
+
+```
+
+## Fig 4
+
+### Water level vs CAR
+```{r}
+p6 <- ggplot(data, aes(x=wl_grow, y=car_all)) +
+        geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  stat_cor(aes(label= ..rr.label..), digits = 2,  label.x = -0.15, label.y = 310) + 
+  labs(color = "Land use",
+       x=expression("Growing season water table level (m)"), 
+       y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    
+        axis.title = element_text(size = 10),   
+        legend.text = element_text(size = 10),  
+        legend.title = element_text(size = 10),
+        legend.position = c(0.2, 0.8)) 
+p6
+
+```
+
+### Lat vs CAR
+
+```{r}
+p7 <- ggplot(data, aes(x=lat, y=car_all)) +
+        geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  stat_cor(aes(label= ..rr.label..), digits = 2,  label.x = 47, label.y = 310) + 
+  labs(color = "Land use",
+       x=expression("Latitude"), 
+       y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),  
+        axis.title = element_text(size = 10),   
+        legend.text = element_text(size = 10),  
+        legend.title = element_text(size = 10),
+        legend.position = c(0.2, 0.8)) 
+p7
+
+```
+
+### Salinity vs CAR
+
+```{r}
+p8 <- ggplot(data, aes(x=sal_annual, y=car_all)) +
+        geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  stat_cor(aes(label= ..rr.label..), digits = 1,  label.x = 20, label.y = 310) + 
+  labs(color = "Land use",
+       x=expression("Annual salinity (ppt)"), 
+       y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    # Adjust axis text size
+        axis.title = element_text(size = 10),   # Adjust axis title size
+        legend.text = element_text(size = 10),  # Adjust legend text size
+        legend.title = element_text(size = 10),
+        legend.position = c(0.2, 0.8)) 
+p8
+
+```
+
+### Dist chan vs CAR
+
+```{r}
+p9 <- ggplot(data_tidal, aes(x=dist_chan, y=car_all)) +
+        geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  stat_cor(aes(label= ..rr.label..), digits = 1,  label.x = 52, label.y = 315) + 
+  labs(color = "Land use",
+       x=expression("Distance to channel (m)"), 
+       y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    # Adjust axis text size
+        axis.title = element_text(size = 10),   # Adjust axis title size
+        legend.text = element_text(size = 10),  # Adjust legend text size
+        legend.title = element_text(size = 10),
+        legend.position = c(0.2, 0.8)) 
+p9
+
+```
+
+### combine 4 plots
+
+```{r}
+p6 <- p6 + theme(legend.position = c(0.2, 0.65),
+                 legend.key.height = unit(0.5, "cm")) +
+  annotate("text", x = -0.98, y = Inf, label = "A", size = 6, fontface = "plain", vjust = 1.5, hjust = -0.2) 
+p7 <- p7 + theme(legend.position = "none") +
+  annotate("text", x = 43.3, y = Inf, label = "B", size = 6, fontface = "plain", vjust = 1.5, hjust = -0.2) 
+p8 <- p8 + theme(legend.position = "none") +
+  annotate("text", x = 0.6, y = Inf, label = "C", size = 6, fontface = "plain", vjust = 1.5, hjust = -0.2) 
+p9 <- p9 + theme(legend.position = "none") +
+  annotate("text", x = 1, y = Inf, label = "D", size = 6, fontface = "plain", vjust = 1.5, hjust = -0.2) 
+
+CAR_scatter_combined <- ggarrange(p6, p7, p8, p9, ncol = 2, nrow = 2)
+
+print(CAR_scatter_combined)
+
+#ggsave("CAR_scatter_combined.png", CAR_scatter_combined, width = 8, height = 5.5, units = "in", dpi = 300)
+```
+
+## Fig S1 - SET vs Pb210 accretion
+
+```{r}
+
+p10 <- ggplot(data=data_S1, aes(x=set, y=pb210)) +
+  geom_smooth(method="lm", alpha = 0.4) +
+  geom_point(size=2, aes(color=land_use), show.legend=TRUE) +
+  stat_regline_equation(label.y = 1.4, aes(label=paste(..eq.label..))) +
+  stat_cor(label.y = 1.26, aes(label= ..rr.label..)) +
+  xlim(c(-1,5)) +
+  labs(
+    color = "Land use",
+    y=expression("Pb-210 accretion rate" ~ (cm ~ yr^-1)), 
+    x=expression("SET elevation change rate" ~(cm ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    # Adjust axis text size
+        axis.title = element_text(size = 10),   # Adjust axis title size
+        legend.text = element_text(size = 9),  # Adjust legend text size
+        legend.title = element_text(size = 10),
+        legend.position = c(0.85, 0.22),
+        legend.key.height = unit(0.5, "cm")) 
+
+pb210_model <- lm(pb210 ~ set, data_S1)
+summary(pb210_model)
+p10
+
+#ggsave("Pb210_vs_SET.png", plot = p10, height=3, width=5, units="in", dpi = 300)
+
+```
+
+## Fig S2 - Accretion vs CD
+
+```{r}
+p11 <- ggplot(data, aes(x=cd, y=pb210_all)) +
+        geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
+  geom_point(aes(color = land_use), alpha = 0.8) +
+  stat_cor(method = "pearson", label.x = 11, label.y = 1.0, r.accuracy = 0.01, 
+           aes(label = ..r.label..)) +
+  labs(color = "Land use",
+       x=expression("C density " ~(mg ~C ~cm^-3)), 
+       y=expression("Accretion rate " ~(cm ~yr^-1))) +
+  scale_color_manual(values = c("Reference" = "#D55E00", "Restored" = "#619CFF", "Disturbed" = "#009E73")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 10),    # Adjust axis text size
+        axis.title = element_text(size = 10),   # Adjust axis title size
+        legend.text = element_text(size = 9),  # Adjust legend text size
+        legend.title = element_text(size = 10),
+        legend.position = c(0.85, 0.75),
+        legend.key.height = unit(0.5, "cm")) 
+p11
+
+#ggsave("pb210_vs_CD.png", p11, width = 5, height = 3, units = "in", dpi = 300)
+
+model <- lm(pb210_all ~ cd, data = data)
+summary(model)
+
+```
+
+
+

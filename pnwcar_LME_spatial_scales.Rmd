@@ -1,0 +1,113 @@
+---
+title: "PNW CAR - LME spatial scales"
+author: "Katrina Poppe"
+date: "`r format(Sys.time(), '%d-%B-%Y %H:%M')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+# Packages
+
+```{r message=FALSE, warning=FALSE}
+library(here) #working directory
+library(tidyverse) #data manipulation
+library(lme4) #linear mixed effects model
+
+```
+
+# Load data
+
+```{r }
+data_S1 <- read.csv(here("pnwcar_data.csv"))
+
+data <- data_S1 %>%
+  filter (project != "SeaGrant")
+
+data_tidal <- data %>%
+  filter(land_use !="Disturbed")
+
+```
+
+# LME for nested spatial scales
+
+## All sites
+
+```{r}
+
+# Fit a mixed model with random effects for each spatial scale
+model <- lmer(car_all ~ (1 | hgm_state) + (1 | estuary) + (1 | site), data = data)
+
+# Extract variance components
+variance_components <- as.data.frame(VarCorr(model))
+print(variance_components)
+
+```
+
+```{r}
+# Extract variance components from the LME model
+vcov_values <- as.data.frame(VarCorr(model))$vcov  # Extract variance components
+
+# Create a dataframe for variance partitioning
+variance_df <- data.frame(
+  grp = c("Site", "Estuary", "HGM State", "Residual"),
+  vcov = vcov_values  # Automatically imported variance components
+)
+
+# Compute total variance
+total_variance <- sum(variance_df$vcov)
+
+# Compute proportion of variance explained at each scale
+variance_df$proportion <- signif(variance_df$vcov / total_variance, digits = 4)
+
+# Print dataframe with proportions, no scientific notation
+options(scipen = 999)
+print(variance_df, row.names = FALSE)
+
+```
+
+## Tidal sites
+
+```{r}
+
+# Fit a mixed model with random effects for each spatial scale
+model <- lmer(car_all ~ (1 | hgm_state) + (1 | estuary) + (1 | site), data = data_tidal)
+
+# Extract variance components
+variance_components <- as.data.frame(VarCorr(model))
+print(variance_components)
+
+```
+
+```{r}
+# Extract variance components from the LME model
+vcov_values <- as.data.frame(VarCorr(model))$vcov  # Extract variance components
+
+# Create a dataframe for variance partitioning
+variance_df <- data.frame(
+  grp = c("Site", "Estuary", "HGM State", "Residual"),
+  vcov = vcov_values  
+)
+
+# Compute total variance
+total_variance <- sum(variance_df$vcov)
+
+# Compute proportion of variance explained at each scale
+variance_df$proportion <- signif(variance_df$vcov / total_variance, digits = 4)
+
+# Print dataframe with proportions, ensuring no scientific notation
+options(scipen = 999)
+print(variance_df, row.names = FALSE)
+
+
+```
+

@@ -1,0 +1,125 @@
+---
+title: "PNW CAR - CIT for drivers of carbon accumulation rates"
+author: "Katrina Poppe"
+date: "`r format(Sys.time(), '%d-%B-%Y %H:%M')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+# Packages
+
+```{r message=FALSE, warning=FALSE}
+
+library(here) #working directory
+library(tidyverse) #data manipulation
+library(partykit) #conditional inference trees
+
+
+```
+
+# Load data
+
+```{r }
+data_S1 <- read.csv(here("pnwcar_data.csv"))
+
+data <- data_S1 %>%
+  filter (project != "SeaGrant")
+
+data_tidal <- data %>%
+  filter(land_use !="Disturbed")
+
+```
+
+# All sites - Figure S4
+
+Lower mincriterion if no splits identified at default value of 0.95
+```{r}
+
+variables <- c("lat",
+               "wl_annual",
+               "wl_summer",
+               "wl_grow",
+               "sal_annual",
+               "sal_summer",
+               "sal_grow",
+               "ts_annual",
+               "ts_summer",
+               "ts_grow",
+               "tw_deep_annual",
+               "tw_deep_summer",
+               "tw_deep_grow")
+
+data_model1 <- data %>%
+  select(car_all, all_of(variables)) %>%
+  mutate_if(is.character, as.factor)
+
+# Define formula with all predictors
+all_predictors_formula <- as.formula(paste("car_all ~", paste(variables, collapse = " + ")))
+
+# Fit the model with all predictors
+ctree_model_all <- partykit::ctree(all_predictors_formula, data = data_model1,
+                         control = ctree_control(mincriterion = 0.95))
+
+print(ctree_model_all)
+plot(ctree_model_all, main = "Conditional Inference Tree with All Predictors")
+
+```
+
+# Tidal sites
+
+```{r}
+
+variables <- c("RSLR", #tidal only
+               "rel_sed", #tidal only
+               "ws_area", #tidal only
+               "dist_chan", #tidal only
+               "z_star", #tidal only
+               "lat",
+               "wl_annual",
+               "wl_summer",
+               "wl_grow",
+               "sal_annual",
+               "sal_summer",
+               "sal_grow",
+               "ts_annual",
+               "ts_summer",
+               "ts_grow",
+               "tw_deep_annual",
+               "tw_deep_summer",
+               "tw_deep_grow"
+               )
+
+data_model2 <- data_tidal %>%
+  select(car_all, all_of(variables)) %>%
+  mutate_if(is.character, as.factor)
+
+# Define formula with all predictors
+all_predictors_formula <- as.formula(paste("car_all ~", paste(variables, collapse = " + ")))
+
+# Fit the model with all predictors
+ctree_model_all <- partykit::ctree(all_predictors_formula, data = data_model2,
+                         control = ctree_control(mincriterion = 0.80))
+
+# Print the model to see split variables and nodes
+print(ctree_model_all)
+
+# Visualize the tree structure
+plot(ctree_model_all, main = "Conditional Inference Tree with All Predictors")
+
+# save image:
+# png("CIT_plot_all.png", width = 600, height = 400)  
+# plot(ctree_model_all, main = "Conditional Inference Tree - All Sites")
+# dev.off()  # Close the PNG device to save the file
+
+```
+
