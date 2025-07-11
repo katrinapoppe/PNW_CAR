@@ -353,10 +353,18 @@ combined_plot
 
 ### Water level vs CAR
 ```{r}
+fit <- lm(car_all ~ wl_grow, data = data)
+r2 <- summary(fit)$r.squared
+p_val <- summary(fit)$coefficients[2, 4]
+
+r2_text <- paste0("italic(R)^2 == ", format(round(r2, 2), nsmall = 2))
+p_text <- paste0("italic(p) == ", format(round(p_val, 3), nsmall = 3))
+
 p6 <- ggplot(data, aes(x=wl_grow, y=car_all)) +
         geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
   geom_point(aes(color = land_use), alpha = 0.8) +
-  stat_cor(aes(label= ..rr.label..), digits = 2,  label.x = -0.15, label.y = 310) + 
+  annotate("text", x = -0.15, y = 320, label = r2_text, parse = TRUE, hjust = 0) +
+  annotate("text", x = -0.15, y = 275, label = p_text, parse = TRUE, hjust = 0) + 
   labs(color = "Land use",
        x=expression("Growing season water table level (m)"), 
        y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
@@ -377,10 +385,18 @@ p6
 ### Lat vs CAR
 
 ```{r}
+fit <- lm(car_all ~ lat, data = data)
+r2 <- summary(fit)$r.squared
+p_val <- summary(fit)$coefficients[2, 4]
+
+r2_text <- paste0("italic(R)^2 == ", format(round(r2, 2), nsmall = 2))
+p_text <- paste0("italic(p) == ", format(round(p_val, 2), nsmall = 3))
+
 p7 <- ggplot(data, aes(x=lat, y=car_all)) +
         geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
   geom_point(aes(color = land_use), alpha = 0.8) +
-  stat_cor(aes(label= ..rr.label..), digits = 2,  label.x = 47, label.y = 310) + 
+  annotate("text", x = 47, y = 320, label = r2_text, parse = TRUE, hjust = 0) +
+  annotate("text", x = 47, y = 275, label = p_text, parse = TRUE, hjust = 0) + 
   labs(color = "Land use",
        x=expression("Latitude"), 
        y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
@@ -401,10 +417,18 @@ p7
 ### Salinity vs CAR
 
 ```{r}
+fit <- lm(car_all ~ sal_annual, data = data)
+r2 <- summary(fit)$r.squared
+p_val <- summary(fit)$coefficients[2, 4]
+
+r2_text <- paste0("italic(R)^2 == ", format(round(r2, 2), nsmall = 2))
+p_text <- paste0("italic(p) == ", format(round(p_val, 3), nsmall = 3))
+
 p8 <- ggplot(data, aes(x=sal_annual, y=car_all)) +
         geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
   geom_point(aes(color = land_use), alpha = 0.8) +
-  stat_cor(aes(label= ..rr.label..), digits = 1,  label.x = 20, label.y = 310) + 
+  annotate("text", x = 20, y = 320, label = r2_text, parse = TRUE, hjust = 0) +
+  annotate("text", x = 20, y = 275, label = p_text, parse = TRUE, hjust = 0) + 
   labs(color = "Land use",
        x=expression("Annual salinity (ppt)"), 
        y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
@@ -425,10 +449,18 @@ p8
 ### Dist chan vs CAR
 
 ```{r}
+fit <- lm(car_all ~ dist_chan, data = data_tidal)
+r2 <- summary(fit)$r.squared
+p_val <- summary(fit)$coefficients[2, 4]
+
+r2_text <- paste0("italic(R)^2 == ", format(round(r2, 2), nsmall = 2))
+p_text <- paste0("italic(p) == ", format(round(p_val, 2), nsmall = 3))
+
 p9 <- ggplot(data_tidal, aes(x=dist_chan, y=car_all)) +
         geom_smooth(method = "lm", se=TRUE, alpha = 0.4) +
   geom_point(aes(color = land_use), alpha = 0.8) +
-  stat_cor(aes(label= ..rr.label..), digits = 1,  label.x = 52, label.y = 315) + 
+  annotate("text", x = 52, y = 325, label = r2_text, parse = TRUE, hjust = 0) +
+  annotate("text", x = 52, y = 284, label = p_text, parse = TRUE, hjust = 0) +
   labs(color = "Land use",
        x=expression("Distance to channel (m)"), 
        y=expression("C accumulation rate " ~(g ~C ~m^-2 ~yr^-1))) +
