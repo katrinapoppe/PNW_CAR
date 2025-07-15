@@ -664,7 +664,7 @@ print(combined_coefficient_plot)
 
 ```
 
-## Fig 5 obs vs pred - combine all sites (p3) + tidal sites (p4) 
+## Fig S4 obs vs pred - combine all sites (p3) + tidal sites (p4) 
 
 ```{r}
 p4 <- p4 + theme(axis.title.y = element_blank())
