@@ -40,7 +40,7 @@ data_tidal <- data %>%
 
 ```
 
-# All sites - Figure S4
+# All sites - Figure 5
 
 Lower mincriterion if no splits identified at default value of 0.95
 ```{r}
