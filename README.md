@@ -19,11 +19,11 @@ This repository contains the R code used to analyze patterns and predictors of c
     - Figure S2
 - pnwcar_LME_car_drivers.Rmd
     - linear mixed-effects model code for drivers of CAR
-    - Figure 5
     - Figure S3
+    - Figure S4
 - pnwcar_CIT_car_drivers.Rmd
     - conditional inference tree code for drivers of CAR
-    - Figure S4
+    - Figure 5
       
 
 ### Contact:
